@@ -1,0 +1,3 @@
+../Core/Src/event_log.c:20:6:event_log_init	8	static
+../Core/Src/event_log.c:27:6:event_log_push	24	static
+../Core/Src/event_log.c:49:10:event_log_count	4	static

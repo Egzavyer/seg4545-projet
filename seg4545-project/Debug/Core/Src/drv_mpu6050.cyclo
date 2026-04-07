@@ -1,0 +1,6 @@
+../Core/Src/drv_mpu6050.c:35:6:mpu6050_init	10
+../Core/Src/drv_mpu6050.c:66:6:mpu6050_read	4
+../Core/Src/drv_mpu6050.c:107:13:reg_write	1
+../Core/Src/drv_mpu6050.c:112:13:reg_read	1
+../Core/Src/drv_mpu6050.c:117:13:burst_read	1
+../Core/Src/drv_mpu6050.c:122:14:absf_local	2

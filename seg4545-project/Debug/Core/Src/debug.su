@@ -1,0 +1,2 @@
+../Core/Src/debug.c:14:6:debug_init	24	static
+../Core/Src/debug.c:23:6:debug_log	216	static

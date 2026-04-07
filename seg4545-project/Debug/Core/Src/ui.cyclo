@@ -1,0 +1,6 @@
+../Core/Src/ui.c:23:6:ui_init	3
+../Core/Src/ui.c:48:6:ui_acknowledge	1
+../Core/Src/ui.c:53:6:ui_update	4
+../Core/Src/ui.c:80:20:state_name	10
+../Core/Src/ui.c:97:13:format_lines	11
+../Core/Src/ui.c:148:13:write_lines_if_changed	5

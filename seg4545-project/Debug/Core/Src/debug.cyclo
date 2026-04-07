@@ -1,0 +1,2 @@
+../Core/Src/debug.c:14:6:debug_init	2
+../Core/Src/debug.c:23:6:debug_log	7

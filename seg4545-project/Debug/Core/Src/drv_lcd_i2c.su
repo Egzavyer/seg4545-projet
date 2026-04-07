@@ -1,0 +1,10 @@
+../Core/Src/drv_lcd_i2c.c:26:6:lcd_i2c_init	8	static
+../Core/Src/drv_lcd_i2c.c:48:6:lcd_i2c_write_lines	16	static
+../Core/Src/drv_lcd_i2c.c:62:6:lcd_i2c_set_backlight	16	static
+../Core/Src/drv_lcd_i2c.c:67:13:lcd_expander_write	24	static
+../Core/Src/drv_lcd_i2c.c:72:13:lcd_pulse	16	static
+../Core/Src/drv_lcd_i2c.c:80:13:lcd_write4	24	static
+../Core/Src/drv_lcd_i2c.c:86:13:lcd_write_cmd	16	static
+../Core/Src/drv_lcd_i2c.c:93:13:lcd_write_data	16	static
+../Core/Src/drv_lcd_i2c.c:99:13:lcd_set_cursor	16	static
+../Core/Src/drv_lcd_i2c.c:105:13:lcd_print_padded	40	static

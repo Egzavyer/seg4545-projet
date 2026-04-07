@@ -1,0 +1,12 @@
+#ifndef APP_UI_PATCH_DEFS_H
+#define APP_UI_PATCH_DEFS_H
+
+#ifndef BUZZER_SILENCE_MS
+#define BUZZER_SILENCE_MS 60000U
+#endif
+
+#ifndef APP_OUTPUT_SELFTEST_MS
+#define APP_OUTPUT_SELFTEST_MS 500U
+#endif
+
+#endif

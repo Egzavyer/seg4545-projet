@@ -1,0 +1,2 @@
+../Core/Src/esp_uart_test.c:10:13:dbg2	16	static
+../Core/Src/esp_uart_test.c:16:6:esp_uart_blocking_test	80	static
