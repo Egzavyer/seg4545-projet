@@ -90,8 +90,8 @@
 /* LCD/UI */
 #define APP_UI_USE_LCD_I2C               1
 #define APP_UI_LCD_I2C_ADDR              (0x3FU << 1)
-#define APP_UI_PAGE_PERIOD_MS            3000U
-#define APP_UI_REFRESH_MS                1000U
+#define APP_UI_PAGE_PERIOD_MS            2500U
+#define APP_UI_REFRESH_MS                500U
 #define APP_LOG_LCD_TO_UART              0
 
 /* Logging */
@@ -119,6 +119,8 @@
 
 #define DS18_TASK_PERIOD_MS               1000U
 #define DS18_HEARTBEAT_TIMEOUT_MS         3000U
+
+#define DS18_BODY_TEMP_OFFSET 			  5.0f
 
 #define BODY_TEMP_WARN_COUNT              2U
 #define BODY_TEMP_ALARM_COUNT             2U

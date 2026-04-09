@@ -3,11 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "main.h"
 #include "app_config.h"
 #include "app_tasks.h"
 #include "debug.h"
 #include "drv_lcd_i2c.h"
-#include "main.h"
 
 static uint8_t s_use_lcd = APP_UI_USE_LCD_I2C;
 static uint8_t s_page = 0U;
@@ -71,7 +71,7 @@ void ui_update(const system_snapshot_t *snapshot)
     if ((now - s_last_page_ms) >= APP_UI_PAGE_PERIOD_MS)
     {
         s_last_page_ms = now;
-        s_page = (uint8_t)((s_page + 1U) % 3U);
+        s_page = (uint8_t)((s_page + 1U) % 4U);
     }
 
     format_lines(snapshot, l1, l2);
@@ -99,13 +99,15 @@ static void format_lines(const system_snapshot_t *snapshot, char *l1, char *l2)
 {
     uint32_t now = HAL_GetTick();
 
-    memset(l1, 0, 17U);
-    memset(l2, 0, 17U);
+    memset(l1, ' ', 16U);
+    memset(l2, ' ', 16U);
+    l1[16] = '\0';
+    l2[16] = '\0';
 
     if ((s_ack_banner_until_ms != 0U) && ((int32_t)(s_ack_banner_until_ms - now) > 0))
     {
-        snprintf(l1, 17U, "ALARM SILENCED");
-        snprintf(l2, 17U, "LOCAL BUZZ OFF");
+        snprintf(l1, 17U, "%-16s", "ALARM SILENCED");
+        snprintf(l2, 17U, "%-16s", "LOCAL BUZZ OFF");
         return;
     }
 
@@ -113,13 +115,23 @@ static void format_lines(const system_snapshot_t *snapshot, char *l1, char *l2)
     {
         case 0U:
             snprintf(l1, 17U, "%-16s", state_name(snapshot->state));
-            snprintf(l2, 17U, "T%2.0f H%2.0f MQ%1.1f",
-                     snapshot->dht11.ambient_temp_c,
-                     snapshot->dht11.humidity_pct,
-                     snapshot->mq2.normalized_level);
+            snprintf(l2, 17U, "W:%u A:%u F:%u Wi:%u",
+                     snapshot->warning_active ? 1U : 0U,
+                     snapshot->alarm_active ? 1U : 0U,
+                     snapshot->sensor_fault_active ? 1U : 0U,
+                     snapshot->wifi_link_ok ? 1U : 0U);
             break;
 
         case 1U:
+            snprintf(l1, 17U, "AT:%2.0fC AH:%2.0f%%",
+                     snapshot->dht11.ambient_temp_c,
+                     snapshot->dht11.humidity_pct);
+            snprintf(l2, 17U, "BT:%5.2fC %c",
+                     snapshot->ds18b20.body_temp_c,
+                     snapshot->ds18b20.valid ? 'V' : '-');
+            break;
+
+        case 2U:
             if (snapshot->max30102.valid)
             {
                 snprintf(l1, 17U, "HR:%3.0f SP:%3.0f",
@@ -128,20 +140,23 @@ static void format_lines(const system_snapshot_t *snapshot, char *l1, char *l2)
             }
             else
             {
-                snprintf(l1, 17U, "HR:--- SP:---");
+                snprintf(l1, 17U, "%-16s", "HR:--- SP:---");
             }
-            snprintf(l2, 17U, "FP:%u SIG:%u QS:%u",
+            snprintf(l2, 17U, "FP:%u SG:%u Q:%2u",
                      snapshot->max30102.finger_present ? 1U : 0U,
                      snapshot->max30102.signal_ok ? 1U : 0U,
                      snapshot->max30102.quality_score);
             break;
 
         default:
-            snprintf(l1, 17U, "MOVE:%1.3f", snapshot->mpu6050.motion_score);
-            snprintf(l2, 17U, "W:%u A:%u F:%u",
-                     snapshot->warning_active ? 1U : 0U,
-                     snapshot->alarm_active ? 1U : 0U,
-                     snapshot->sensor_fault_active ? 1U : 0U);
+            snprintf(l1, 17U, "MQ:%4.2f MV:%1.3f",
+                     snapshot->mq2.normalized_level,
+                     snapshot->mpu6050.motion_score);
+            snprintf(l2, 17U, "D:%u B:%u M:%u G:%u",
+                     snapshot->dht11.valid ? 1U : 0U,
+                     snapshot->ds18b20.valid ? 1U : 0U,
+                     snapshot->max30102.valid ? 1U : 0U,
+                     snapshot->mq2.valid ? 1U : 0U);
             break;
     }
 }

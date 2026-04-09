@@ -95,7 +95,7 @@ bool ds18b20_read_temp_c(float *temp_c)
     }
 
     raw = (int16_t)(((uint16_t)scratch[1] << 8) | scratch[0]);
-    *temp_c = (float)raw / 16.0f;
+    *temp_c = ((float)raw / 16.0f) + DS18_BODY_TEMP_OFFSET;
     return true;
 }
 

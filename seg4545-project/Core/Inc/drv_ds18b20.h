@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "main.h"
+#include "app_config.h"
 
 /*
  * Selected pin for this project:
