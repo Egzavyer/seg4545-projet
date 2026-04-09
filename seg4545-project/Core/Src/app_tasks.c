@@ -7,6 +7,7 @@
 #include "app_config.h"
 #include "app_types.h"
 #include "drv_dht11.h"
+#include "drv_ds18b20.h"
 #include "drv_max30102.h"
 #include "drv_mpu6050.h"
 #include "drv_mq2.h"
@@ -22,6 +23,7 @@ extern ADC_HandleTypeDef hadc1;
 
 typedef enum {
 	APP_TASK_DHT = 0,
+	APP_TASK_DS18,
 	APP_TASK_MAX,
 	APP_TASK_MPU,
 	APP_TASK_MQ2,
@@ -47,10 +49,15 @@ typedef struct {
 	uint8_t hr_warn;
 	uint8_t spo2_warn;
 	uint8_t motion_warn;
+	uint8_t body_temp_low_warn;
+	uint8_t body_temp_high_warn;
+
 	uint8_t mq2_alarm;
 	uint8_t hr_alarm;
 	uint8_t spo2_alarm;
 	uint8_t motion_alarm;
+	uint8_t body_temp_low_alarm;
+	uint8_t body_temp_high_alarm;
 } cause_flags_t;
 
 osMutexId_t g_i2cMutex = NULL;
@@ -74,6 +81,7 @@ static void DecisionTask(void *argument);
 static void UiTask(void *argument);
 static void EspTask(void *argument);
 static void SupervisorTask(void *argument);
+static void Ds18Task(void *argument);
 
 static void publish_sensor_msg(const sensor_msg_t *msg);
 static void heartbeat(app_task_id_t id);
@@ -136,6 +144,8 @@ static const osThreadAttr_t espTaskAttr = { .name = "espTask", .priority =
 		osPriorityBelowNormal, .stack_size = 1280 };
 static const osThreadAttr_t supervisorTaskAttr = { .name = "supervisorTask",
 		.priority = osPriorityAboveNormal, .stack_size = 1024 };
+static const osThreadAttr_t ds18TaskAttr = { .name = "ds18Task", .priority =
+		osPriorityNormal, .stack_size = 768 };
 
 void app_tasks_create_all(void) {
 	const osMutexAttr_t i2cMutexAttr = { .name = "i2cMutex" };
@@ -149,7 +159,7 @@ void app_tasks_create_all(void) {
 	g_i2cMutex = osMutexNew(&i2cMutexAttr);
 	g_snapshotMutex = osMutexNew(&snapshotMutexAttr);
 	g_sensorQueue = osMessageQueueNew(SENSOR_QUEUE_LENGTH, sizeof(sensor_msg_t),
-			NULL);
+	NULL);
 	g_eventFlags = osEventFlagsNew(NULL);
 	g_heartbeatFlags = osEventFlagsNew(NULL);
 
@@ -160,6 +170,7 @@ void app_tasks_create_all(void) {
 	g_snapshot.wifi_link_ok = false;
 
 	osThreadId_t dhtHandle;
+	osThreadId_t ds18Handle;
 	osThreadId_t maxHandle;
 	osThreadId_t mpuHandle;
 	osThreadId_t mq2Handle;
@@ -170,6 +181,9 @@ void app_tasks_create_all(void) {
 
 	dhtHandle = osThreadNew(DhtTask, NULL, &dhtTaskAttr);
 	debug_log("[TASK] DHT %s\r\n", dhtHandle ? "OK" : "FAIL");
+
+	ds18Handle = osThreadNew(Ds18Task, NULL, &ds18TaskAttr);
+	debug_log("[TASK] DS18 %s\r\n", ds18Handle ? "OK" : "FAIL");
 
 	maxHandle = osThreadNew(MaxTask, NULL, &maxTaskAttr);
 	debug_log("[TASK] MAX %s\r\n", maxHandle ? "OK" : "FAIL");
@@ -232,10 +246,11 @@ static void DhtTask(void *argument) {
 	(void) argument;
 	sensor_msg_t msg = { 0 };
 	uint32_t next = osKernelGetTickCount();
-	uint8_t last_ok = 0U;
+	uint8_t consecutive_failures = 0U;
+	uint8_t had_good_data = 0U;
 
-	last_ok = dht11_init() ? 1U : 0U;
-	debug_log("[DHT11] init %s\r\n", last_ok ? "OK" : "FAIL");
+	had_good_data = dht11_init() ? 1U : 0U;
+	debug_log("[DHT11] init %s\r\n", had_good_data ? "OK" : "FAIL");
 
 	osDelay(1500U);
 
@@ -246,25 +261,31 @@ static void DhtTask(void *argument) {
 
 		if (dht11_read(&msg.data.dht11)) {
 			msg.status = SENSOR_STATUS_OK;
-			if (last_ok == 0U) {
+			consecutive_failures = 0U;
+
+			if (!had_good_data) {
 				debug_log("[DHT11] recovered T=%.1f H=%.1f\r\n",
 						msg.data.dht11.ambient_temp_c,
 						msg.data.dht11.humidity_pct);
-				event_log_push("DHT recover T=%.1f H=%.1f",
-						msg.data.dht11.ambient_temp_c,
-						msg.data.dht11.humidity_pct);
 			}
-			last_ok = 1U;
+
+			had_good_data = 1U;
+			publish_sensor_msg(&msg);
 		} else {
-			msg.status = SENSOR_STATUS_NO_DATA;
-			if (last_ok != 0U) {
-				debug_log("[DHT11] read failed\r\n");
-				event_log_push("DHT fail");
+			consecutive_failures++;
+
+			if (consecutive_failures >= DHT_CONSECUTIVE_FAIL_LIMIT) {
+				msg.status = SENSOR_STATUS_NO_DATA;
+
+				if (had_good_data) {
+					debug_log("[DHT11] read failed\r\n");
+				}
+
+				had_good_data = 0U;
+				publish_sensor_msg(&msg);
 			}
-			last_ok = 0U;
 		}
 
-		publish_sensor_msg(&msg);
 		heartbeat(APP_TASK_DHT);
 		osDelayUntil(next);
 	}
@@ -283,6 +304,7 @@ static void MaxTask(void *argument) {
 	} else {
 		msg.status = SENSOR_STATUS_COMM_ERROR;
 	}
+
 	debug_log("[MAX30102] init %s\r\n",
 			(msg.status == SENSOR_STATUS_OK) ? "OK" : "FAIL");
 
@@ -293,11 +315,13 @@ static void MaxTask(void *argument) {
 
 		if (g_i2cMutex != NULL) {
 			osMutexAcquire(g_i2cMutex, osWaitForever);
+
 			if (max30102_read(&msg.data.max30102)) {
 				msg.status = SENSOR_STATUS_OK;
 			} else {
 				msg.status = SENSOR_STATUS_NO_DATA;
 			}
+
 			osMutexRelease(g_i2cMutex);
 		} else {
 			msg.status = SENSOR_STATUS_COMM_ERROR;
@@ -384,6 +408,70 @@ static void Mq2Task(void *argument) {
 	}
 }
 
+static void Ds18Task(void *argument) {
+	(void) argument;
+	sensor_msg_t msg = { 0 };
+	uint32_t next = osKernelGetTickCount();
+	uint8_t last_ok = 0U;
+	float temp_c = 0.0f;
+	uint8_t conversion_started = 0U;
+
+	last_ok = ds18b20_init() ? 1U : 0U;
+	debug_log("[DS18B20] init %s\r\n", last_ok ? "OK" : "FAIL");
+
+	for (;;) {
+		next += DS18_TASK_PERIOD_MS;
+		msg.id = SENSOR_ID_DS18B20;
+		msg.tick_ms = osKernelGetTickCount();
+
+		if (!conversion_started) {
+			conversion_started = ds18b20_start_conversion() ? 1U : 0U;
+
+			if (!conversion_started) {
+				msg.status = SENSOR_STATUS_NO_DATA;
+				msg.data.ds18b20.valid = false;
+
+				if (last_ok != 0U) {
+					debug_log("[DS18B20] start conversion failed\r\n");
+				}
+				last_ok = 0U;
+
+				publish_sensor_msg(&msg);
+				heartbeat(APP_TASK_DS18);
+				osDelayUntil(next);
+				continue;
+			}
+
+			/* Give the sensor time to convert without blocking the CPU */
+			osDelay(750U);
+		}
+
+		if (ds18b20_read_temp_c(&temp_c)) {
+			msg.status = SENSOR_STATUS_OK;
+			msg.data.ds18b20.body_temp_c = temp_c;
+			msg.data.ds18b20.valid = true;
+
+			if (last_ok == 0U) {
+				debug_log("[DS18B20] recovered T=%.2fC\r\n", temp_c);
+			}
+			last_ok = 1U;
+		} else {
+			msg.status = SENSOR_STATUS_NO_DATA;
+			msg.data.ds18b20.valid = false;
+
+			if (last_ok != 0U) {
+				debug_log("[DS18B20] read failed\r\n");
+			}
+			last_ok = 0U;
+		}
+
+		conversion_started = 0U;
+		publish_sensor_msg(&msg);
+		heartbeat(APP_TASK_DS18);
+		osDelayUntil(next);
+	}
+}
+
 static void update_snapshot_from_msg(const sensor_msg_t *msg) {
 	switch (msg->id) {
 	case SENSOR_ID_DHT11:
@@ -425,6 +513,14 @@ static void update_snapshot_from_msg(const sensor_msg_t *msg) {
 		}
 		break;
 
+	case SENSOR_ID_DS18B20:
+		if (msg->status == SENSOR_STATUS_OK) {
+			g_snapshot.ds18b20 = msg->data.ds18b20;
+		} else {
+			g_snapshot.ds18b20.valid = false;
+		}
+		break;
+
 	default:
 		break;
 	}
@@ -439,6 +535,10 @@ static void evaluate_snapshot(system_snapshot_t *snapshot) {
 	static uint32_t humidityWarnCount = 0U;
 	static uint32_t mq2WarnCount = 0U;
 	static uint32_t mq2AlarmCount = 0U;
+	static uint32_t bodyTempLowWarnCount = 0U;
+	static uint32_t bodyTempLowAlarmCount = 0U;
+	static uint32_t bodyTempHighWarnCount = 0U;
+	static uint32_t bodyTempHighAlarmCount = 0U;
 	static uint32_t lastMovementTick = 0U;
 	static uint8_t motionWarnLatched = 0U;
 	static uint8_t motionAlarmLatched = 0U;
@@ -504,6 +604,35 @@ static void evaluate_snapshot(system_snapshot_t *snapshot) {
 		humidityWarnCount = 0U;
 	}
 
+	if (snapshot->ds18b20.valid) {
+		if (snapshot->ds18b20.body_temp_c <= BODY_TEMP_LOW_WARN_C) {
+			bodyTempLowWarnCount++;
+		} else {
+			bodyTempLowWarnCount = 0U;
+		}
+		if (snapshot->ds18b20.body_temp_c <= BODY_TEMP_LOW_ALARM_C) {
+			bodyTempLowAlarmCount++;
+		} else {
+			bodyTempLowAlarmCount = 0U;
+		}
+
+		if (snapshot->ds18b20.body_temp_c >= BODY_TEMP_HIGH_WARN_C) {
+			bodyTempHighWarnCount++;
+		} else {
+			bodyTempHighWarnCount = 0U;
+		}
+		if (snapshot->ds18b20.body_temp_c >= BODY_TEMP_HIGH_ALARM_C) {
+			bodyTempHighAlarmCount++;
+		} else {
+			bodyTempHighAlarmCount = 0U;
+		}
+	} else {
+		bodyTempLowWarnCount = 0U;
+		bodyTempLowAlarmCount = 0U;
+		bodyTempHighWarnCount = 0U;
+		bodyTempHighAlarmCount = 0U;
+	}
+
 	if (snapshot->mq2.valid) {
 		if (snapshot->mq2.normalized_level >= MQ2_WARN_RATIO) {
 			mq2WarnCount++;
@@ -541,6 +670,15 @@ static void evaluate_snapshot(system_snapshot_t *snapshot) {
 	s_causes.hr_alarm = (hrAlarmCount >= HR_ALARM_COUNT) ? 1U : 0U;
 	s_causes.spo2_alarm = (spo2AlarmCount >= SPO2_ALARM_COUNT) ? 1U : 0U;
 	s_causes.motion_alarm = (inactiveMs >= APP_INACTIVITY_ALARM_MS) ? 1U : 0U;
+
+	s_causes.body_temp_low_warn =
+			(bodyTempLowWarnCount >= BODY_TEMP_WARN_COUNT) ? 1U : 0U;
+	s_causes.body_temp_high_warn =
+			(bodyTempHighWarnCount >= BODY_TEMP_WARN_COUNT) ? 1U : 0U;
+	s_causes.body_temp_low_alarm =
+			(bodyTempLowAlarmCount >= BODY_TEMP_ALARM_COUNT) ? 1U : 0U;
+	s_causes.body_temp_high_alarm =
+			(bodyTempHighAlarmCount >= BODY_TEMP_ALARM_COUNT) ? 1U : 0U;
 
 	if (s_causes.motion_warn && !motionWarnLatched) {
 		motionWarnLatched = 1U;
@@ -602,11 +740,13 @@ static void evaluate_snapshot(system_snapshot_t *snapshot) {
 #endif
 
 	if (s_causes.hr_alarm || s_causes.spo2_alarm || s_causes.mq2_alarm
-			|| s_causes.motion_alarm) {
+			|| s_causes.motion_alarm || s_causes.body_temp_low_alarm
+			|| s_causes.body_temp_high_alarm) {
 		snapshot->alarm_active = true;
 		snapshot->state = SYS_ALARM_LOCAL;
 	} else if (s_causes.temp_warn || s_causes.humidity_warn || s_causes.mq2_warn
-			|| s_causes.hr_warn || s_causes.spo2_warn || s_causes.motion_warn) {
+			|| s_causes.hr_warn || s_causes.spo2_warn || s_causes.motion_warn
+			|| s_causes.body_temp_low_warn || s_causes.body_temp_high_warn) {
 		snapshot->warning_active = true;
 		snapshot->state = SYS_WARNING;
 	} else if (snapshot->sensor_fault_active) {
@@ -629,6 +769,14 @@ static const char* highest_cause_name(void) {
 		return "hr_alarm";
 	if (s_causes.spo2_alarm)
 		return "spo2_alarm";
+	if (s_causes.body_temp_low_alarm)
+		return "body_temp_low_alarm";
+	if (s_causes.body_temp_high_alarm)
+		return "body_temp_high_alarm";
+	if (s_causes.body_temp_low_warn)
+		return "body_temp_low_warn";
+	if (s_causes.body_temp_high_warn)
+		return "body_temp_high_warn";
 	if (s_causes.motion_warn)
 		return "motion_warn";
 	if (s_causes.temp_warn)
@@ -663,11 +811,11 @@ static const char* demo_mode_name(demo_mode_t mode) {
 
 static void log_state_causes(const system_snapshot_t *snapshot) {
 	debug_log(
-			"[CAUSE] %s T=%.1f H=%.1f MQ=%.2f HR=%.1f SP=%.1f MV=%.3f FP=%u SIG=%u QS=%u PK=%u\r\n",
+			"[CAUSE] %s T=%.1f H=%.1f BT=%.2f MQ=%.2f HR=%.1f SP=%.1f MV=%.3f FP=%u SIG=%u QS=%u PK=%u\r\n",
 			highest_cause_name(), snapshot->dht11.ambient_temp_c,
-			snapshot->dht11.humidity_pct, snapshot->mq2.normalized_level,
-			snapshot->max30102.heart_rate_bpm, snapshot->max30102.spo2_pct,
-			snapshot->mpu6050.motion_score,
+			snapshot->dht11.humidity_pct, snapshot->ds18b20.body_temp_c,
+			snapshot->mq2.normalized_level, snapshot->max30102.heart_rate_bpm,
+			snapshot->max30102.spo2_pct, snapshot->mpu6050.motion_score,
 			snapshot->max30102.finger_present ? 1U : 0U,
 			snapshot->max30102.signal_ok ? 1U : 0U,
 			snapshot->max30102.quality_score, snapshot->max30102.peak_count);
@@ -718,13 +866,13 @@ static void DecisionTask(void *argument) {
 
 			if (g_snapshot.alarm_active) {
 				(void) osEventFlagsSet(g_eventFlags,
-						EVT_ALARM_ACTIVE | EVT_NEW_STATUS);
+				EVT_ALARM_ACTIVE | EVT_NEW_STATUS);
 			} else if (g_snapshot.warning_active) {
 				(void) osEventFlagsSet(g_eventFlags,
-						EVT_WARN_ACTIVE | EVT_NEW_STATUS);
+				EVT_WARN_ACTIVE | EVT_NEW_STATUS);
 			} else {
 				(void) osEventFlagsClear(g_eventFlags,
-						EVT_WARN_ACTIVE | EVT_ALARM_ACTIVE);
+				EVT_WARN_ACTIVE | EVT_ALARM_ACTIVE);
 				(void) osEventFlagsSet(g_eventFlags, EVT_NEW_STATUS);
 			}
 
@@ -746,15 +894,17 @@ static void DecisionTask(void *argument) {
 
 			if ((HAL_GetTick() - last_summary_tick) >= APP_LOG_SUMMARY_PERIOD_MS) {
 				debug_log(
-						"[SUMMARY] state=%s T=%.1f H=%.1f MQ=%.2f HR=%.1f SP=%.1f MV=%.3f flags=%u%u%u%u demo=%s q=%lu\r\n",
+						"[SUMMARY] state=%s T=%.1f H=%.1f BT=%.2f MQ=%.2f HR=%.1f SP=%.1f MV=%.3f flags=%u%u%u%u%u demo=%s q=%lu\r\n",
 						state_to_str(g_snapshot.state),
 						g_snapshot.dht11.ambient_temp_c,
 						g_snapshot.dht11.humidity_pct,
+						g_snapshot.ds18b20.body_temp_c,
 						g_snapshot.mq2.normalized_level,
 						g_snapshot.max30102.heart_rate_bpm,
 						g_snapshot.max30102.spo2_pct,
 						g_snapshot.mpu6050.motion_score,
 						g_snapshot.dht11.valid ? 1U : 0U,
+						g_snapshot.ds18b20.valid ? 1U : 0U,
 						g_snapshot.max30102.valid ? 1U : 0U,
 						g_snapshot.mpu6050.valid ? 1U : 0U,
 						g_snapshot.mq2.valid ? 1U : 0U,
@@ -910,8 +1060,9 @@ static void UiTask(void *argument) {
 static void EspTask(void *argument) {
 	(void) argument;
 	uint32_t next = osKernelGetTickCount();
-	char line[160];
+	char line[192];
 	uint8_t last_link_ok = 0U;
+	uint8_t consecutive_failures = 0U;
 
 	(void) esp_uart_init();
 	debug_log("[ESP] started\r\n");
@@ -921,35 +1072,48 @@ static void EspTask(void *argument) {
 
 		osMutexAcquire(g_snapshotMutex, osWaitForever);
 		(void) snprintf(line, sizeof(line),
-				"{\"state\":%u,\"warn\":%u,\"alarm\":%u,\"temp\":%.1f,\"hum\":%.1f,\"hr\":%.1f,\"spo2\":%.1f,\"mq2\":%.2f}\r\n",
+				"{\"state\":%u,\"warn\":%u,\"alarm\":%u,\"temp\":%.1f,\"hum\":%.1f,\"body_temp\":%.2f,\"hr\":%.1f,\"spo2\":%.1f,\"mq2\":%.2f}\r\n",
 				(unsigned) g_snapshot.state,
 				g_snapshot.warning_active ? 1U : 0U,
 				g_snapshot.alarm_active ? 1U : 0U,
 				g_snapshot.dht11.ambient_temp_c, g_snapshot.dht11.humidity_pct,
+				g_snapshot.ds18b20.body_temp_c,
 				g_snapshot.max30102.heart_rate_bpm,
 				g_snapshot.max30102.spo2_pct, g_snapshot.mq2.normalized_level);
 		osMutexRelease(g_snapshotMutex);
 
 		if (esp_uart_send_line(line)) {
+			consecutive_failures = 0U;
+
 			osMutexAcquire(g_snapshotMutex, osWaitForever);
 			g_snapshot.wifi_link_ok = true;
 			osMutexRelease(g_snapshotMutex);
+
 			(void) osEventFlagsClear(g_eventFlags, EVT_COMMS_FAULT);
+
 			if (last_link_ok == 0U) {
-				debug_log("[ESP] UART link OK\r\n");
-				event_log_push("ESP link ok");
+				debug_log("[ESP] UART TX recovered\r\n");
+				event_log_push("ESP TX recovered");
 			}
+
 			last_link_ok = 1U;
 		} else {
-			osMutexAcquire(g_snapshotMutex, osWaitForever);
-			g_snapshot.wifi_link_ok = false;
-			osMutexRelease(g_snapshotMutex);
-			(void) osEventFlagsSet(g_eventFlags, EVT_COMMS_FAULT);
-			if (last_link_ok != 0U) {
-				debug_log("[ESP] UART link FAIL\r\n");
-				event_log_push("ESP link fail");
+			consecutive_failures++;
+
+			if (consecutive_failures >= 3U) {
+				osMutexAcquire(g_snapshotMutex, osWaitForever);
+				g_snapshot.wifi_link_ok = false;
+				osMutexRelease(g_snapshotMutex);
+
+				(void) osEventFlagsSet(g_eventFlags, EVT_COMMS_FAULT);
+
+				if (last_link_ok != 0U) {
+					debug_log("[ESP] UART TX failed\r\n");
+					event_log_push("ESP TX failed");
+				}
+
+				last_link_ok = 0U;
 			}
-			last_link_ok = 0U;
 		}
 
 		heartbeat(APP_TASK_ESP);
@@ -982,32 +1146,36 @@ static void SupervisorTask(void *argument) {
 		}
 
 		uint8_t ok_dht = check_task_deadline(APP_TASK_DHT,
-				DHT_HEARTBEAT_TIMEOUT_MS, now);
+		DHT_HEARTBEAT_TIMEOUT_MS, now);
+		uint8_t ok_ds18 = check_task_deadline(APP_TASK_DS18,
+		DS18_HEARTBEAT_TIMEOUT_MS, now);
 		uint8_t ok_max = check_task_deadline(APP_TASK_MAX,
-				MAX_HEARTBEAT_TIMEOUT_MS, now);
+		MAX_HEARTBEAT_TIMEOUT_MS, now);
 		uint8_t ok_mpu = check_task_deadline(APP_TASK_MPU,
-				MPU_HEARTBEAT_TIMEOUT_MS, now);
+		MPU_HEARTBEAT_TIMEOUT_MS, now);
 		uint8_t ok_mq2 = check_task_deadline(APP_TASK_MQ2,
-				MQ2_HEARTBEAT_TIMEOUT_MS, now);
+		MQ2_HEARTBEAT_TIMEOUT_MS, now);
 		uint8_t ok_dec = check_task_deadline(APP_TASK_DECISION,
-				DECISION_HEARTBEAT_TIMEOUT_MS, now);
+		DECISION_HEARTBEAT_TIMEOUT_MS, now);
 		uint8_t ok_ui = check_task_deadline(APP_TASK_UI,
-				UI_HEARTBEAT_TIMEOUT_MS, now);
+		UI_HEARTBEAT_TIMEOUT_MS, now);
 		uint8_t ok_esp = check_task_deadline(APP_TASK_ESP,
-				ESP_HEARTBEAT_TIMEOUT_MS, now);
+		ESP_HEARTBEAT_TIMEOUT_MS, now);
 
-		if (!(ok_dht && ok_max && ok_mpu && ok_mq2 && ok_dec && ok_ui && ok_esp)) {
+		if (!(ok_dht && ok_ds18 && ok_max && ok_mpu && ok_mq2 && ok_dec && ok_ui
+				&& ok_esp)) {
 			osMutexAcquire(g_snapshotMutex, osWaitForever);
 			g_snapshot.state = SYS_FAULT;
 			g_snapshot.sensor_fault_active = true;
 			osMutexRelease(g_snapshotMutex);
 
 			debug_log(
-					"[SUPERVISOR] deadline miss dht=%u max=%u mpu=%u mq2=%u dec=%u ui=%u esp=%u\r\n",
-					ok_dht, ok_max, ok_mpu, ok_mq2, ok_dec, ok_ui, ok_esp);
+					"[SUPERVISOR] deadline miss dht=%u ds18=%u max=%u mpu=%u mq2=%u dec=%u ui=%u esp=%u\r\n",
+					ok_dht, ok_ds18, ok_max, ok_mpu, ok_mq2, ok_dec, ok_ui,
+					ok_esp);
 			event_log_push("supervisor deadline miss");
 			(void) osEventFlagsSet(g_eventFlags,
-					EVT_SENSOR_FAULT | EVT_NEW_STATUS);
+			EVT_SENSOR_FAULT | EVT_NEW_STATUS);
 		}
 
 		osDelayUntil(next);

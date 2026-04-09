@@ -111,4 +111,18 @@
 #define APP_DEMO_MODE_ENABLE             1
 #define APP_BUTTON_LONG_PRESS_MS         1500UL
 
+/* DS18B20 body temperature thresholds (prototype/project values) */
+#define BODY_TEMP_LOW_WARN_C              36.4f
+#define BODY_TEMP_LOW_ALARM_C             35.5f
+#define BODY_TEMP_HIGH_WARN_C             37.5f
+#define BODY_TEMP_HIGH_ALARM_C            38.0f
+
+#define DS18_TASK_PERIOD_MS               1000U
+#define DS18_HEARTBEAT_TIMEOUT_MS         3000U
+
+#define BODY_TEMP_WARN_COUNT              2U
+#define BODY_TEMP_ALARM_COUNT             2U
+
+#define DHT_CONSECUTIVE_FAIL_LIMIT        3U
+
 #endif

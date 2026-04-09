@@ -1,6 +1,5 @@
-Core/Src/app_tasks.o: ../Core/Src/app_tasks.c ../Core/Inc/app_tasks.h \
- ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
- ../Core/Inc/app_types.h ../Core/Inc/main.h \
+Core/Src/drv_ds18b20.o: ../Core/Src/drv_ds18b20.c \
+ ../Core/Inc/drv_ds18b20.h ../Core/Inc/main.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h \
  ../Core/Inc/stm32f4xx_hal_conf.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc.h \
@@ -34,14 +33,10 @@ Core/Src/app_tasks.o: ../Core/Src/app_tasks.c ../Core/Inc/app_tasks.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h \
- ../Core/Inc/app_tasks.h ../Core/Inc/app_config.h ../Core/Inc/app_types.h \
- ../Core/Inc/drv_dht11.h ../Core/Inc/drv_ds18b20.h ../Core/Inc/main.h \
- ../Core/Inc/drv_max30102.h ../Core/Inc/drv_mpu6050.h \
- ../Core/Inc/drv_mq2.h ../Core/Inc/drv_esp_uart.h ../Core/Inc/debug.h \
- ../Core/Inc/event_log.h ../Core/Inc/ui.h
-../Core/Inc/app_tasks.h:
-../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
-../Core/Inc/app_types.h:
+ ../Core/Inc/app_tasks.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
+ ../Core/Inc/app_types.h
+../Core/Inc/drv_ds18b20.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
 ../Core/Inc/stm32f4xx_hal_conf.h:
@@ -77,15 +72,5 @@ Core/Src/app_tasks.o: ../Core/Src/app_tasks.c ../Core/Inc/app_tasks.h \
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h:
 ../Core/Inc/app_tasks.h:
-../Core/Inc/app_config.h:
+../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
 ../Core/Inc/app_types.h:
-../Core/Inc/drv_dht11.h:
-../Core/Inc/drv_ds18b20.h:
-../Core/Inc/main.h:
-../Core/Inc/drv_max30102.h:
-../Core/Inc/drv_mpu6050.h:
-../Core/Inc/drv_mq2.h:
-../Core/Inc/drv_esp_uart.h:
-../Core/Inc/debug.h:
-../Core/Inc/event_log.h:
-../Core/Inc/ui.h:

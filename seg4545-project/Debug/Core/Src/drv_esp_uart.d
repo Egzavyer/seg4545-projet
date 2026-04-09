@@ -35,7 +35,7 @@ Core/Src/drv_esp_uart.o: ../Core/Src/drv_esp_uart.c \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h \
  ../Core/Inc/app_tasks.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
- ../Core/Inc/app_types.h
+ ../Core/Inc/app_types.h ../Core/Inc/debug.h
 ../Core/Inc/drv_esp_uart.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
@@ -74,3 +74,4 @@ Core/Src/drv_esp_uart.o: ../Core/Src/drv_esp_uart.c \
 ../Core/Inc/app_tasks.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
 ../Core/Inc/app_types.h:
+../Core/Inc/debug.h:

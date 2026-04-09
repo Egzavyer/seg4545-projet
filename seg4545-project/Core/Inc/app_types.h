@@ -7,6 +7,7 @@
 typedef enum
 {
     SENSOR_ID_DHT11 = 0,
+    SENSOR_ID_DS18B20,
     SENSOR_ID_MAX30102,
     SENSOR_ID_MPU6050,
     SENSOR_ID_MQ2,
@@ -41,6 +42,12 @@ typedef struct
     float humidity_pct;
     bool  valid;
 } dht11_data_t;
+
+typedef struct
+{
+    float body_temp_c;
+    bool  valid;
+} ds18b20_data_t;
 
 typedef struct
 {
@@ -87,6 +94,7 @@ typedef struct
         max30102_data_t max30102;
         mpu6050_data_t  mpu6050;
         mq2_data_t      mq2;
+        ds18b20_data_t  ds18b20;
     } data;
 } sensor_msg_t;
 
@@ -96,6 +104,7 @@ typedef struct
     max30102_data_t   max30102;
     mpu6050_data_t    mpu6050;
     mq2_data_t        mq2;
+    ds18b20_data_t    ds18b20;
     system_state_t    state;
     bool              wifi_link_ok;
     bool              sensor_fault_active;

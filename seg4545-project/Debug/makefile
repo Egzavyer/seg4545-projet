@@ -64,8 +64,8 @@ all: main-build
 main-build: seg4545-project.elf secondary-outputs
 
 # Tool invocations
-seg4545-project.elf seg4545-project.map: $(OBJS) $(USER_OBJS) C:\dev\uniCode\SEG4545\seg4545-project\STM32F446RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "seg4545-project.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\dev\uniCode\SEG4545\seg4545-project\STM32F446RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="seg4545-project.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
+seg4545-project.elf seg4545-project.map: $(OBJS) $(USER_OBJS) C:\dev\uniCode\SEG4545\FinalProject\seg4545-project\STM32F446RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "seg4545-project.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\dev\uniCode\SEG4545\FinalProject\seg4545-project\STM32F446RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="seg4545-project.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

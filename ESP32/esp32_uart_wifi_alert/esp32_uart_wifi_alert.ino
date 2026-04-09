@@ -2,48 +2,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 
-/*
-  Programming target:
-  - Arduino IDE or PlatformIO using the Arduino core for ESP32.
-
-  STM32 -> ESP32 UART wiring expected:
-  - STM32 PA9  (USART1_TX) -> ESP32 RX pin below
-  - STM32 PA10 (USART1_RX) <- ESP32 TX pin below
-  - GND common
-
-  Default pins below match the common ESP32 DevKit usage of UART2 on GPIO16/GPIO17.
-*/
-
-#define WIFI_SSID       "BrotherLaserPrinter"
-#define WIFI_PASSWORD   "1333RoCk5!"
-
-/*
-  Alert target options:
-  1) ntfy topic URL, e.g.:
-     "https://ntfy.sh/your_topic_name"
-
-  2) Generic webhook URL, e.g. IFTTT webhook URL:
-     "https://maker.ifttt.com/trigger/infant_alarm/with/key/YOUR_KEY"
-
-  By default this sketch is set up for ntfy-style plain text POSTs.
-*/
-#define ALERT_WEBHOOK_URL "https://ntfy.sh/infant_alarm"
-#define ALERT_MODE_NTFY   1
-
-#define SEND_WARNING_ALERTS     1
-#define ALARM_REMINDER_MS       60000UL
-
-#define STM_UART_BAUD           115200UL
-#define STM_UART_RX_PIN         16
-#define STM_UART_TX_PIN         17
-
-#define DEBUG_BAUD              115200UL
-#define WIFI_RETRY_MS           5000UL
-#define WIFI_CONNECT_TIMEOUT_MS 15000UL
-#define HTTP_CONNECT_TIMEOUT_MS 8000
-#define HTTP_TIMEOUT_MS         12000
-
-#define VERBOSE_RAW_JSON        1
+#include "config.h"
 
 struct MonitorPacket {
   int state = 0;
@@ -51,12 +10,14 @@ struct MonitorPacket {
   int alarm = 0;
   float temp = 0.0f;
   float hum = 0.0f;
+  float body_temp = 0.0f;
   float hr = 0.0f;
   float spo2 = 0.0f;
   float mq2 = 0.0f;
   bool hasState = false;
   bool hasWarn = false;
   bool hasAlarm = false;
+  bool hasBodyTemp = false;
 };
 
 HardwareSerial StmUart(2);
@@ -65,7 +26,6 @@ static String lineBuffer;
 static unsigned long lastWifiAttemptMs = 0;
 static unsigned long lastStatusPrintMs = 0;
 static unsigned long lastAlertSentMs = 0;
-static unsigned long lastAlarmSeenMs = 0;
 static bool alarmLatched = false;
 static bool warningLatched = false;
 
@@ -181,10 +141,6 @@ static void handlePacket(const MonitorPacket &pkt, const String &raw) {
   bool alarmActive = pkt.hasAlarm && (pkt.alarm != 0);
   bool warningActive = pkt.hasWarn && (pkt.warn != 0);
 
-  if (alarmActive) {
-    lastAlarmSeenMs = now;
-  }
-
   if (alarmActive && !alarmLatched) {
     String title = "Infant monitor ALARM";
     String body = buildSummary(pkt);
@@ -280,12 +236,13 @@ static bool sendWebhookAlert(const String &title, const String &body, bool highP
 
 static String buildSummary(const MonitorPacket &pkt) {
   String s;
-  s.reserve(200);
+  s.reserve(240);
   s += "state=" + String(pkt.state);
   s += ", warn=" + String(pkt.warn);
   s += ", alarm=" + String(pkt.alarm);
   s += ", temp=" + String(pkt.temp, 1) + "C";
   s += ", hum=" + String(pkt.hum, 1) + "%";
+  s += ", body_temp=" + String(pkt.body_temp, 2) + "C";
   s += ", hr=" + String(pkt.hr, 1) + " bpm";
   s += ", spo2=" + String(pkt.spo2, 1) + "%";
   s += ", mq2=" + String(pkt.mq2, 2);
@@ -293,8 +250,8 @@ static String buildSummary(const MonitorPacket &pkt) {
 }
 
 static void printPacket(const MonitorPacket &pkt, const String &raw) {
-  Serial.printf("[ESP32] RX state=%d warn=%d alarm=%d temp=%.1f hum=%.1f hr=%.1f spo2=%.1f mq2=%.2f\n",
-                pkt.state, pkt.warn, pkt.alarm, pkt.temp, pkt.hum, pkt.hr, pkt.spo2, pkt.mq2);
+  Serial.printf("[ESP32] RX state=%d warn=%d alarm=%d temp=%.1f hum=%.1f body_temp=%.2f hr=%.1f spo2=%.1f mq2=%.2f\n",
+                pkt.state, pkt.warn, pkt.alarm, pkt.temp, pkt.hum, pkt.body_temp, pkt.hr, pkt.spo2, pkt.mq2);
   if (VERBOSE_RAW_JSON) {
     Serial.printf("[ESP32] RAW %s\n", raw.c_str());
   }
@@ -307,6 +264,7 @@ static bool parsePacket(const String &json, MonitorPacket &pkt) {
   any |= extractInt(json, "\"alarm\"", pkt.alarm);
   any |= extractFloat(json, "\"temp\"", pkt.temp);
   any |= extractFloat(json, "\"hum\"", pkt.hum);
+  any |= extractFloat(json, "\"body_temp\"", pkt.body_temp);
   any |= extractFloat(json, "\"hr\"", pkt.hr);
   any |= extractFloat(json, "\"spo2\"", pkt.spo2);
   any |= extractFloat(json, "\"mq2\"", pkt.mq2);
@@ -314,6 +272,7 @@ static bool parsePacket(const String &json, MonitorPacket &pkt) {
   pkt.hasState = json.indexOf("\"state\"") >= 0;
   pkt.hasWarn = json.indexOf("\"warn\"") >= 0;
   pkt.hasAlarm = json.indexOf("\"alarm\"") >= 0;
+  pkt.hasBodyTemp = json.indexOf("\"body_temp\"") >= 0;
 
   return any;
 }

@@ -1,6 +1,7 @@
 "./Core/Src/app_tasks.o"
 "./Core/Src/debug.o"
 "./Core/Src/drv_dht11.o"
+"./Core/Src/drv_ds18b20.o"
 "./Core/Src/drv_esp_uart.o"
 "./Core/Src/drv_lcd_i2c.o"
 "./Core/Src/drv_max30102.o"

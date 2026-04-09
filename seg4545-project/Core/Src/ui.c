@@ -7,6 +7,7 @@
 #include "app_tasks.h"
 #include "debug.h"
 #include "drv_lcd_i2c.h"
+#include "main.h"
 
 static uint8_t s_use_lcd = APP_UI_USE_LCD_I2C;
 static uint8_t s_page = 0U;

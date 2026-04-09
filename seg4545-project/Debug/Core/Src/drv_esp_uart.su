@@ -1,2 +1,2 @@
-../Core/Src/drv_esp_uart.c:8:6:esp_uart_init	4	static
-../Core/Src/drv_esp_uart.c:13:6:esp_uart_send_line	16	static
+../Core/Src/drv_esp_uart.c:9:6:esp_uart_init	4	static
+../Core/Src/drv_esp_uart.c:14:6:esp_uart_send_line	40	static
