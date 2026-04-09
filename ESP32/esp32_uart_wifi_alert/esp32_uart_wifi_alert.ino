@@ -1,8 +1,23 @@
+#define BLYNK_TEMPLATE_ID   "TMPL22CniNIDH"
+#define BLYNK_TEMPLATE_NAME "Baby monitor"
+#define BLYNK_AUTH_TOKEN    "intyooB_aZHJfDYFM_f1pa3ThnlZRCic"
+
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <BlynkSimpleEsp32.h>
 
 #include "config.h"
+
+#define VPIN_TEMP       V0
+#define VPIN_HUM        V1
+#define VPIN_HR         V2
+#define VPIN_SPO2       V3
+#define VPIN_MQ2        V4
+#define VPIN_STATE      V5
+#define VPIN_WARN       V6
+#define VPIN_ALARM      V7
+#define VPIN_BODY_TEMP  V8
 
 struct MonitorPacket {
   int state = 0;
@@ -35,6 +50,7 @@ static bool parsePacket(const String &json, MonitorPacket &pkt);
 static void connectWifiIfNeeded();
 static void processUart();
 static void handlePacket(const MonitorPacket &pkt, const String &raw);
+static void pushToBlynk(const MonitorPacket &pkt);
 static bool sendWebhookAlert(const String &title, const String &body, bool highPriority);
 static String buildSummary(const MonitorPacket &pkt);
 static void printPacket(const MonitorPacket &pkt, const String &raw);
@@ -55,18 +71,29 @@ void setup() {
                 (unsigned long)STM_UART_BAUD, STM_UART_RX_PIN, STM_UART_TX_PIN);
 
   connectWifiIfNeeded();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Blynk.config(BLYNK_AUTH_TOKEN);
+    Blynk.connect(5000);
+    Serial.println("[ESP32] Blynk configured");
+  }
 }
 
 void loop() {
+  if (WiFi.status() == WL_CONNECTED) {
+    Blynk.run();
+  }
+
   connectWifiIfNeeded();
   processUart();
 
   unsigned long now = millis();
   if ((now - lastStatusPrintMs) >= 5000UL) {
     lastStatusPrintMs = now;
-    Serial.printf("[ESP32] WiFi=%s IP=%s alarmLatched=%d warningLatched=%d\n",
+    Serial.printf("[ESP32] WiFi=%s IP=%s Blynk=%s alarmLatched=%d warningLatched=%d\n",
                   (WiFi.status() == WL_CONNECTED) ? "connected" : "down",
                   (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString().c_str() : "0.0.0.0",
+                  Blynk.connected() ? "connected" : "down",
                   alarmLatched ? 1 : 0,
                   warningLatched ? 1 : 0);
   }
@@ -98,6 +125,8 @@ static void connectWifiIfNeeded() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("[ESP32] WiFi connected, IP=%s RSSI=%d dBm\n",
                   WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    Blynk.config(BLYNK_AUTH_TOKEN);
+    Blynk.connect(5000);
   } else {
     Serial.println("[ESP32] WiFi connect timeout");
   }
@@ -136,7 +165,26 @@ static void processUart() {
   }
 }
 
+static void pushToBlynk(const MonitorPacket &pkt) {
+  if (!Blynk.connected()) {
+    Serial.println("[ESP32] Blynk not connected, skipping push");
+    return;
+  }
+  Blynk.virtualWrite(VPIN_TEMP,      pkt.temp);
+  Blynk.virtualWrite(VPIN_HUM,       pkt.hum);
+  Blynk.virtualWrite(VPIN_HR,        pkt.hr);
+  Blynk.virtualWrite(VPIN_SPO2,      pkt.spo2);
+  Blynk.virtualWrite(VPIN_MQ2,       pkt.mq2);
+  Blynk.virtualWrite(VPIN_STATE,     pkt.state);
+  Blynk.virtualWrite(VPIN_WARN,      pkt.warn);
+  Blynk.virtualWrite(VPIN_ALARM,     pkt.alarm);
+  Blynk.virtualWrite(VPIN_BODY_TEMP, pkt.body_temp);
+  Serial.println("[ESP32] pushed to Blynk");
+}
+
 static void handlePacket(const MonitorPacket &pkt, const String &raw) {
+  pushToBlynk(pkt);
+
   unsigned long now = millis();
   bool alarmActive = pkt.hasAlarm && (pkt.alarm != 0);
   bool warningActive = pkt.hasWarn && (pkt.warn != 0);
