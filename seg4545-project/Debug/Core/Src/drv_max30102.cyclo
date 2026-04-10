@@ -1,7 +1,7 @@
 ../Core/Src/drv_max30102.c:64:6:max30102_init	16
 ../Core/Src/drv_max30102.c:106:6:max30102_read	18
-../Core/Src/drv_max30102.c:210:13:process_single_sample	36
-../Core/Src/drv_max30102.c:321:26:reg_write	1
-../Core/Src/drv_max30102.c:326:26:reg_read	1
-../Core/Src/drv_max30102.c:331:26:burst_read	1
-../Core/Src/drv_max30102.c:336:13:reset_state	1
+../Core/Src/drv_max30102.c:220:13:process_single_sample	35
+../Core/Src/drv_max30102.c:334:26:reg_write	1
+../Core/Src/drv_max30102.c:339:26:reg_read	1
+../Core/Src/drv_max30102.c:344:26:burst_read	1
+../Core/Src/drv_max30102.c:349:13:reset_state	1

@@ -21,6 +21,10 @@ extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 extern ADC_HandleTypeDef hadc1;
 
+static uint32_t s_max_last_good_ms = 0U;
+static float s_max_last_good_hr = 0.0f;
+static float s_max_last_good_spo2 = 0.0f;
+
 typedef enum {
 	APP_TASK_DHT = 0,
 	APP_TASK_DS18,
@@ -452,7 +456,7 @@ static void Ds18Task(void *argument) {
 			msg.data.ds18b20.valid = true;
 
 			if (last_ok == 0U) {
-				debug_log("[DS18B20] recovered T=%.2fC\r\n", temp_c);
+				debug_log("[DS18oB20] recovered T=%.2fC\r\n", temp_c);
 			}
 			last_ok = 1U;
 		} else {
@@ -485,9 +489,22 @@ static void update_snapshot_from_msg(const sensor_msg_t *msg) {
 	case SENSOR_ID_MAX30102:
 		if (msg->status == SENSOR_STATUS_OK) {
 			g_snapshot.max30102 = msg->data.max30102;
-			if (!g_snapshot.max30102.valid) {
-				g_snapshot.max30102.heart_rate_bpm = 0.0f;
-				g_snapshot.max30102.spo2_pct = 0.0f;
+
+			if (g_snapshot.max30102.valid) {
+				s_max_last_good_ms = HAL_GetTick();
+				s_max_last_good_hr = g_snapshot.max30102.heart_rate_bpm;
+				s_max_last_good_spo2 = g_snapshot.max30102.spo2_pct;
+			} else {
+				if (g_snapshot.max30102.finger_present
+						&& ((HAL_GetTick() - s_max_last_good_ms)
+								<= MAX_DISPLAY_HOLD_MS)) {
+					g_snapshot.max30102.valid = true;
+					g_snapshot.max30102.heart_rate_bpm = s_max_last_good_hr;
+					g_snapshot.max30102.spo2_pct = s_max_last_good_spo2;
+				} else {
+					g_snapshot.max30102.heart_rate_bpm = 0.0f;
+					g_snapshot.max30102.spo2_pct = 0.0f;
+				}
 			}
 		} else {
 			g_snapshot.max30102.valid = false;

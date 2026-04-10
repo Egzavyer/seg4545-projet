@@ -132,6 +132,8 @@ bool max30102_read(max30102_data_t *out)
                               (s_state.red_dc > MAX30102_FINGER_RED_MIN);
         out->quality_score = s_state.quality_score;
         out->peak_count = s_state.peak_count;
+
+        /* Keep signal_ok informational only. */
         out->signal_ok = (s_state.quality_score >= MAX30102_QUALITY_GOOD_SCORE);
 
         if (out->finger_present &&
@@ -149,7 +151,13 @@ bool max30102_read(max30102_data_t *out)
             out->valid = false;
         }
 
-        return false;
+        /*
+         * Important fix:
+         * returning true here keeps the held reading alive in MaxTask/app_tasks.
+         * The old version returned false, which made the snapshot logic clear
+         * HR/SpO2 back to zero immediately even though we still had a usable held value.
+         */
+        return true;
     }
 
     if (sample_count > 4U)
@@ -187,6 +195,8 @@ bool max30102_read(max30102_data_t *out)
                           (s_state.red_dc > MAX30102_FINGER_RED_MIN);
     out->quality_score = s_state.quality_score;
     out->peak_count = s_state.peak_count;
+
+    /* Keep signal_ok informational only. */
     out->signal_ok = (s_state.quality_score >= MAX30102_QUALITY_GOOD_SCORE);
 
     if (out->finger_present &&
@@ -213,6 +223,7 @@ static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sa
     float ir  = (float)ir_raw;
     float red_hp, ir_hp;
     float red_ratio, ir_ratio;
+    float threshold;
 
     if (s_state.red_dc <= 1.0f) s_state.red_dc = red;
     if (s_state.ir_dc  <= 1.0f) s_state.ir_dc  = ir;
@@ -255,61 +266,63 @@ static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sa
         }
     }
 
-    if (s_state.quality_score >= MAX30102_QUALITY_GOOD_SCORE)
+    /*
+     * Permissive mode:
+     * Do NOT gate peak detection on quality_score.
+     * quality_score remains informational only.
+     */
+    threshold = fmaxf(MAX30102_MIN_PEAK_THRESHOLD,
+                      s_state.ir_dc * MAX30102_DYNAMIC_PEAK_RATIO);
+
+    if ((s_state.prev1_hp > s_state.prev2_hp) &&
+        (s_state.prev1_hp > ir_hp) &&
+        (s_state.prev1_hp > threshold))
     {
-        float threshold = fmaxf(MAX30102_MIN_PEAK_THRESHOLD,
-                                s_state.ir_dc * MAX30102_DYNAMIC_PEAK_RATIO);
-
-        if ((s_state.prev1_hp > s_state.prev2_hp) &&
-            (s_state.prev1_hp > ir_hp) &&
-            (s_state.prev1_hp > threshold))
+        if ((s_state.last_peak_ms == 0U) || ((sample_time_ms - s_state.last_peak_ms) >= MAX30102_MIN_IBI_MS))
         {
-            if ((s_state.last_peak_ms == 0U) || ((sample_time_ms - s_state.last_peak_ms) >= MAX30102_MIN_IBI_MS))
+            if (s_state.last_peak_ms != 0U)
             {
-                if (s_state.last_peak_ms != 0U)
+                uint32_t ibi = sample_time_ms - s_state.last_peak_ms;
+                if ((ibi >= MAX30102_MIN_IBI_MS) && (ibi <= MAX30102_MAX_IBI_MS))
                 {
-                    uint32_t ibi = sample_time_ms - s_state.last_peak_ms;
-                    if ((ibi >= MAX30102_MIN_IBI_MS) && (ibi <= MAX30102_MAX_IBI_MS))
+                    float inst_bpm = 60000.0f / (float)ibi;
+                    if (s_state.bpm <= 1.0f)
                     {
-                        float inst_bpm = 60000.0f / (float)ibi;
-                        if (s_state.bpm <= 1.0f)
-                        {
-                            s_state.bpm = inst_bpm;
-                        }
-                        else
-                        {
-                            s_state.bpm = (0.85f * s_state.bpm) + (0.15f * inst_bpm);
-                        }
+                        s_state.bpm = inst_bpm;
+                    }
+                    else
+                    {
+                        s_state.bpm = (0.85f * s_state.bpm) + (0.15f * inst_bpm);
+                    }
 
-                        if ((s_state.red_dc > 1.0f) && (s_state.ir_dc > 1.0f) &&
-                            (s_state.red_ac > 1.0f) && (s_state.ir_ac > 1.0f))
+                    if ((s_state.red_dc > 1.0f) && (s_state.ir_dc > 1.0f) &&
+                        (s_state.red_ac > 1.0f) && (s_state.ir_ac > 1.0f))
+                    {
+                        float R = (s_state.red_ac / s_state.red_dc) / (s_state.ir_ac / s_state.ir_dc);
+                        if ((R > 0.2f) && (R < 3.4f))
                         {
-                            float R = (s_state.red_ac / s_state.red_dc) / (s_state.ir_ac / s_state.ir_dc);
-                            if ((R > 0.2f) && (R < 3.4f))
-                            {
-                                float est_spo2 = 104.0f - (17.0f * R);
-                                if (est_spo2 < 70.0f) est_spo2 = 70.0f;
-                                if (est_spo2 > 100.0f) est_spo2 = 100.0f;
-                                s_state.spo2 = est_spo2;
-                            }
-                        }
-
-                        if ((s_state.bpm >= 45.0f) && (s_state.bpm <= 220.0f) &&
-                            (s_state.spo2 >= 70.0f) && (s_state.spo2 <= 100.0f))
-                        {
-                            s_state.last_good_bpm = s_state.bpm;
-                            s_state.last_good_spo2 = s_state.spo2;
-                            s_state.last_good_ms = sample_time_ms;
-                        }
-
-                        if (s_state.peak_count < 255U)
-                        {
-                            s_state.peak_count++;
+                            float est_spo2 = 104.0f - (17.0f * R);
+                            if (est_spo2 < 70.0f) est_spo2 = 70.0f;
+                            if (est_spo2 > 100.0f) est_spo2 = 100.0f;
+                            s_state.spo2 = est_spo2;
                         }
                     }
+
+                    if ((s_state.bpm >= 45.0f) && (s_state.bpm <= 220.0f) &&
+                        (s_state.spo2 >= 70.0f) && (s_state.spo2 <= 100.0f))
+                    {
+                        s_state.last_good_bpm = s_state.bpm;
+                        s_state.last_good_spo2 = s_state.spo2;
+                        s_state.last_good_ms = sample_time_ms;
+                    }
+
+                    if (s_state.peak_count < 255U)
+                    {
+                        s_state.peak_count++;
+                    }
                 }
-                s_state.last_peak_ms = sample_time_ms;
             }
+            s_state.last_peak_ms = sample_time_ms;
         }
     }
 

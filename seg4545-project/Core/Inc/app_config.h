@@ -65,21 +65,23 @@
 #define EVT_NEW_STATUS                   (1UL << 5)
 
 /* MAX30102 tuning */
-#define MAX30102_FINGER_IR_MIN           20000.0f
-#define MAX30102_FINGER_RED_MIN          12000.0f
-#define MAX30102_AC_MIN_RATIO            0.0006f
-#define MAX30102_AC_MAX_RATIO            0.0600f
-#define MAX30102_SIGNAL_SETTLE_SAMPLES   8U
-#define MAX30102_MIN_IBI_MS              333U
-#define MAX30102_MAX_IBI_MS              1500U
-#define MAX30102_MIN_PEAK_THRESHOLD      120.0f
-#define MAX30102_DYNAMIC_PEAK_RATIO      0.0012f
-#define MAX30102_DATA_STALE_MS           300U
-#define MAX30102_VALID_HOLD_MS           2000U
+#define MAX30102_FINGER_IR_MIN           8000.0f
+#define MAX30102_FINGER_RED_MIN          4000.0f
+#define MAX30102_AC_MIN_RATIO            0.0001f
+#define MAX30102_AC_MAX_RATIO            0.1200f
+#define MAX30102_SIGNAL_SETTLE_SAMPLES   0U
+#define MAX30102_MIN_IBI_MS              300U
+#define MAX30102_MAX_IBI_MS              1800U
+#define MAX30102_MIN_PEAK_THRESHOLD      20.0f
+#define MAX30102_DYNAMIC_PEAK_RATIO      0.0001f
+#define MAX30102_DATA_STALE_MS           500U
+#define MAX30102_VALID_HOLD_MS           5000U
 #define MAX30102_QUALITY_UP_STEP         2U
 #define MAX30102_QUALITY_DOWN_STEP       1U
-#define MAX30102_QUALITY_GOOD_SCORE      8U
+#define MAX30102_QUALITY_GOOD_SCORE      0U
 #define MAX30102_QUALITY_MAX_SCORE       20U
+
+#define MAX_DISPLAY_HOLD_MS              5000U
 
 /* Local alarm / UI */
 #define BUZZER_SILENCE_MS                60000U
