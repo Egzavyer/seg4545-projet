@@ -1,7 +1,9 @@
-../Core/Src/drv_max30102.c:64:6:max30102_init	16	static
-../Core/Src/drv_max30102.c:106:6:max30102_read	64	static
-../Core/Src/drv_max30102.c:220:13:process_single_sample	72	static
-../Core/Src/drv_max30102.c:334:26:reg_write	32	static
-../Core/Src/drv_max30102.c:339:26:reg_read	32	static
-../Core/Src/drv_max30102.c:344:26:burst_read	32	static
-../Core/Src/drv_max30102.c:349:13:reset_state	8	static
+../Core/Src/drv_max30102.c:80:6:max30102_init	16	static
+../Core/Src/drv_max30102.c:122:6:max30102_read	64	static
+../Core/Src/drv_max30102.c:230:13:process_single_sample	80	static
+../Core/Src/drv_max30102.c:393:13:ibi_push	16	static
+../Core/Src/drv_max30102.c:404:17:ibi_median_ms	40	static
+../Core/Src/drv_max30102.c:440:26:reg_write	32	static
+../Core/Src/drv_max30102.c:445:26:reg_read	32	static
+../Core/Src/drv_max30102.c:450:26:burst_read	32	static
+../Core/Src/drv_max30102.c:455:13:reset_state	8	static

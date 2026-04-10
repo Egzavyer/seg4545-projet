@@ -29,6 +29,13 @@ extern I2C_HandleTypeDef hi2c1;
 
 #define MAX30102_PART_ID             0x15U
 
+#define MAX30102_SAMPLE_PERIOD_MS    10U
+#define MAX30102_COMMIT_MIN_QUALITY  4U
+#define MAX30102_MIN_STABLE_BEATS    2U
+#define MAX30102_MAX_IBI_HISTORY     5U
+#define MAX30102_BPM_STABILITY_DELTA 10.0f
+#define MAX30102_HP_FILT_ALPHA       0.65f
+
 typedef struct
 {
     float red_dc;
@@ -44,13 +51,20 @@ typedef struct
 
     float prev2_hp;
     float prev1_hp;
+    float prev2_hp_filt;
+    float prev1_hp_filt;
+    float last_inst_bpm;
 
     uint32_t last_peak_ms;
     uint32_t last_sample_ms;
     uint32_t last_good_ms;
+    uint32_t ibi_hist[MAX30102_MAX_IBI_HISTORY];
 
     uint8_t quality_score;
     uint8_t peak_count;
+    uint8_t stable_beat_count;
+    uint8_t ibi_count;
+    uint8_t ibi_wr_idx;
 } max30102_state_t;
 
 static max30102_state_t s_state;
@@ -60,6 +74,8 @@ static HAL_StatusTypeDef reg_read(uint8_t reg, uint8_t *value);
 static HAL_StatusTypeDef burst_read(uint8_t reg, uint8_t *buf, uint16_t len);
 static void reset_state(void);
 static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sample_time_ms);
+static void ibi_push(uint32_t ibi_ms);
+static uint32_t ibi_median_ms(void);
 
 bool max30102_init(void)
 {
@@ -132,9 +148,8 @@ bool max30102_read(max30102_data_t *out)
                               (s_state.red_dc > MAX30102_FINGER_RED_MIN);
         out->quality_score = s_state.quality_score;
         out->peak_count = s_state.peak_count;
-
-        /* Keep signal_ok informational only. */
-        out->signal_ok = (s_state.quality_score >= MAX30102_QUALITY_GOOD_SCORE);
+        out->signal_ok = (s_state.quality_score >= MAX30102_COMMIT_MIN_QUALITY) &&
+                         (s_state.stable_beat_count >= 1U);
 
         if (out->finger_present &&
             (s_state.last_good_ms != 0U) &&
@@ -151,12 +166,6 @@ bool max30102_read(max30102_data_t *out)
             out->valid = false;
         }
 
-        /*
-         * Important fix:
-         * returning true here keeps the held reading alive in MaxTask/app_tasks.
-         * The old version returned false, which made the snapshot logic clear
-         * HR/SpO2 back to zero immediately even though we still had a usable held value.
-         */
         return true;
     }
 
@@ -184,7 +193,9 @@ bool max30102_read(max30102_data_t *out)
         red_raw &= 0x3FFFFU;
         ir_raw  &= 0x3FFFFU;
 
-        process_single_sample(red_raw, ir_raw, now_ms - ((sample_count - 1U - i) * 10U));
+        process_single_sample(red_raw,
+                              ir_raw,
+                              now_ms - ((sample_count - 1U - i) * MAX30102_SAMPLE_PERIOD_MS));
     }
 
     out->red_dc = s_state.red_dc;
@@ -195,9 +206,8 @@ bool max30102_read(max30102_data_t *out)
                           (s_state.red_dc > MAX30102_FINGER_RED_MIN);
     out->quality_score = s_state.quality_score;
     out->peak_count = s_state.peak_count;
-
-    /* Keep signal_ok informational only. */
-    out->signal_ok = (s_state.quality_score >= MAX30102_QUALITY_GOOD_SCORE);
+    out->signal_ok = (s_state.quality_score >= MAX30102_COMMIT_MIN_QUALITY) &&
+                     (s_state.stable_beat_count >= 1U);
 
     if (out->finger_present &&
         (s_state.last_good_ms != 0U) &&
@@ -223,6 +233,7 @@ static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sa
     float ir  = (float)ir_raw;
     float red_hp, ir_hp;
     float red_ratio, ir_ratio;
+    float ir_hp_filt;
     float threshold;
 
     if (s_state.red_dc <= 1.0f) s_state.red_dc = red;
@@ -234,8 +245,11 @@ static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sa
     red_hp = red - s_state.red_dc;
     ir_hp  = ir  - s_state.ir_dc;
 
+    ir_hp_filt = (MAX30102_HP_FILT_ALPHA * s_state.prev1_hp_filt) +
+                 ((1.0f - MAX30102_HP_FILT_ALPHA) * ir_hp);
+
     s_state.red_ac = fabsf(red_hp);
-    s_state.ir_ac  = fabsf(ir_hp);
+    s_state.ir_ac  = fabsf(ir_hp_filt);
 
     red_ratio = (s_state.red_dc > 1.0f) ? (s_state.red_ac / s_state.red_dc) : 0.0f;
     ir_ratio  = (s_state.ir_dc  > 1.0f) ? (s_state.ir_ac  / s_state.ir_dc)  : 0.0f;
@@ -245,7 +259,7 @@ static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sa
         (red_ratio >= MAX30102_AC_MIN_RATIO) && (red_ratio <= MAX30102_AC_MAX_RATIO) &&
         (ir_ratio  >= MAX30102_AC_MIN_RATIO) && (ir_ratio  <= MAX30102_AC_MAX_RATIO))
     {
-        if (s_state.quality_score + MAX30102_QUALITY_UP_STEP >= MAX30102_QUALITY_MAX_SCORE)
+        if ((uint32_t)s_state.quality_score + MAX30102_QUALITY_UP_STEP >= MAX30102_QUALITY_MAX_SCORE)
         {
             s_state.quality_score = MAX30102_QUALITY_MAX_SCORE;
         }
@@ -266,19 +280,15 @@ static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sa
         }
     }
 
-    /*
-     * Permissive mode:
-     * Do NOT gate peak detection on quality_score.
-     * quality_score remains informational only.
-     */
     threshold = fmaxf(MAX30102_MIN_PEAK_THRESHOLD,
                       s_state.ir_dc * MAX30102_DYNAMIC_PEAK_RATIO);
 
-    if ((s_state.prev1_hp > s_state.prev2_hp) &&
-        (s_state.prev1_hp > ir_hp) &&
-        (s_state.prev1_hp > threshold))
+    if ((s_state.prev1_hp_filt > s_state.prev2_hp_filt) &&
+        (s_state.prev1_hp_filt > ir_hp_filt) &&
+        (s_state.prev1_hp_filt > threshold))
     {
-        if ((s_state.last_peak_ms == 0U) || ((sample_time_ms - s_state.last_peak_ms) >= MAX30102_MIN_IBI_MS))
+        if ((s_state.last_peak_ms == 0U) ||
+            ((sample_time_ms - s_state.last_peak_ms) >= MAX30102_MIN_IBI_MS))
         {
             if (s_state.last_peak_ms != 0U)
             {
@@ -286,13 +296,41 @@ static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sa
                 if ((ibi >= MAX30102_MIN_IBI_MS) && (ibi <= MAX30102_MAX_IBI_MS))
                 {
                     float inst_bpm = 60000.0f / (float)ibi;
-                    if (s_state.bpm <= 1.0f)
+                    uint32_t median_ibi;
+                    float bpm_est;
+
+                    ibi_push(ibi);
+                    median_ibi = ibi_median_ms();
+                    bpm_est = (median_ibi > 0U) ? (60000.0f / (float)median_ibi) : inst_bpm;
+
+                    if (s_state.last_inst_bpm > 1.0f)
                     {
-                        s_state.bpm = inst_bpm;
+                        if (fabsf(inst_bpm - s_state.last_inst_bpm) <= MAX30102_BPM_STABILITY_DELTA)
+                        {
+                            if (s_state.stable_beat_count < 255U)
+                            {
+                                s_state.stable_beat_count++;
+                            }
+                        }
+                        else
+                        {
+                            s_state.stable_beat_count = 0U;
+                        }
                     }
                     else
                     {
-                        s_state.bpm = (0.85f * s_state.bpm) + (0.15f * inst_bpm);
+                        s_state.stable_beat_count = 0U;
+                    }
+
+                    s_state.last_inst_bpm = inst_bpm;
+
+                    if (s_state.bpm <= 1.0f)
+                    {
+                        s_state.bpm = bpm_est;
+                    }
+                    else
+                    {
+                        s_state.bpm = (0.70f * s_state.bpm) + (0.30f * bpm_est);
                     }
 
                     if ((s_state.red_dc > 1.0f) && (s_state.ir_dc > 1.0f) &&
@@ -304,11 +342,21 @@ static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sa
                             float est_spo2 = 104.0f - (17.0f * R);
                             if (est_spo2 < 70.0f) est_spo2 = 70.0f;
                             if (est_spo2 > 100.0f) est_spo2 = 100.0f;
-                            s_state.spo2 = est_spo2;
+
+                            if (s_state.spo2 <= 1.0f)
+                            {
+                                s_state.spo2 = est_spo2;
+                            }
+                            else
+                            {
+                                s_state.spo2 = (0.80f * s_state.spo2) + (0.20f * est_spo2);
+                            }
                         }
                     }
 
-                    if ((s_state.bpm >= 45.0f) && (s_state.bpm <= 220.0f) &&
+                    if ((s_state.quality_score >= MAX30102_COMMIT_MIN_QUALITY) &&
+                        (s_state.stable_beat_count >= MAX30102_MIN_STABLE_BEATS) &&
+                        (s_state.bpm >= 45.0f) && (s_state.bpm <= 220.0f) &&
                         (s_state.spo2 >= 70.0f) && (s_state.spo2 <= 100.0f))
                     {
                         s_state.last_good_bpm = s_state.bpm;
@@ -322,13 +370,71 @@ static void process_single_sample(uint32_t red_raw, uint32_t ir_raw, uint32_t sa
                     }
                 }
             }
+
             s_state.last_peak_ms = sample_time_ms;
         }
     }
 
+    if ((s_state.ir_dc <= MAX30102_FINGER_IR_MIN) || (s_state.red_dc <= MAX30102_FINGER_RED_MIN))
+    {
+        s_state.stable_beat_count = 0U;
+        s_state.last_inst_bpm = 0.0f;
+        s_state.ibi_count = 0U;
+        s_state.ibi_wr_idx = 0U;
+    }
+
     s_state.prev2_hp = s_state.prev1_hp;
     s_state.prev1_hp = ir_hp;
+    s_state.prev2_hp_filt = s_state.prev1_hp_filt;
+    s_state.prev1_hp_filt = ir_hp_filt;
     s_state.last_sample_ms = sample_time_ms;
+}
+
+static void ibi_push(uint32_t ibi_ms)
+{
+    s_state.ibi_hist[s_state.ibi_wr_idx] = ibi_ms;
+    s_state.ibi_wr_idx = (uint8_t)((s_state.ibi_wr_idx + 1U) % MAX30102_MAX_IBI_HISTORY);
+
+    if (s_state.ibi_count < MAX30102_MAX_IBI_HISTORY)
+    {
+        s_state.ibi_count++;
+    }
+}
+
+static uint32_t ibi_median_ms(void)
+{
+    uint32_t tmp[MAX30102_MAX_IBI_HISTORY];
+    uint8_t n = s_state.ibi_count;
+
+    if (n == 0U)
+    {
+        return 0U;
+    }
+
+    for (uint8_t i = 0U; i < n; i++)
+    {
+        tmp[i] = s_state.ibi_hist[i];
+    }
+
+    for (uint8_t i = 1U; i < n; i++)
+    {
+        uint32_t key = tmp[i];
+        int8_t j = (int8_t)i - 1;
+
+        while ((j >= 0) && (tmp[j] > key))
+        {
+            tmp[j + 1] = tmp[j];
+            j--;
+        }
+        tmp[j + 1] = key;
+    }
+
+    if ((n & 1U) != 0U)
+    {
+        return tmp[n / 2U];
+    }
+
+    return (tmp[(n / 2U) - 1U] + tmp[n / 2U]) / 2U;
 }
 
 static HAL_StatusTypeDef reg_write(uint8_t reg, uint8_t value)
